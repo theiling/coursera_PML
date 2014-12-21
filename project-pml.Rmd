@@ -1,0 +1,200 @@
+---
+title: "Coursera Practical Machine Learning"
+author: "Thomas H"
+date: "Saturday, December 20, 2014"
+output: html_document
+---
+
+## Background to the Project
+
+Using devices such as Jawbone Up, Nike FuelBand, and Fitbit it is now possible to collect a large amount of data about personal activity relatively inexpensively. These type of devices are part of the quantified self movement - a group of enthusiasts who take measurements about themselves regularly to improve their health, to find patterns in their behavior, or because they are tech geeks. One thing that people regularly do is quantify how much of a particular activity they do, but they rarely quantify how well they do it. In this project, your goal will be to use data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants. They were asked to perform barbell lifts correctly and incorrectly in 5 different ways. More information is available from the website here: <http://groupware.les.inf.puc-rio.br/har> (see the section on the Weight Lifting Exercise Dataset). 
+
+## Data for the Project
+
+The training data for this project are available at <https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv>.
+
+The test data are available at <https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv>. 
+
+The data for this project come from this source: <http://groupware.les.inf.puc-rio.br/har>.
+
+## Goals of the Project 
+
+The goal of this project is to predict the manner in which they did the exercise. This is the "classe" variable in the training set. Other variables are used to predict "classe". This report describes how to built the prediction model, how cross validation was used, what the expected out of sample error is, and why the choices were maid. The prediction model was used to predict 20 different test cases. 
+
+## R code for prediction
+
+In the working directory load libraries, read the data, delete empty or almost empty columns and identifying columns that cannot explain the response (such as time).
+
+```{r}
+library(caret)
+library(kernlab)
+library(rpart)
+
+# SETTING THE SEED TO GUARANTEE THE REPRODUCIBILITY.
+set.seed(1985)
+
+# Training dataset:
+training.data <- read.csv("pml-training.csv",header=TRUE,na.strings=c("NA","#DIV/0!", ""))
+str(training.data)
+#head(training.data)
+#summary(training.data)
+
+# Delete missing values (100 variables will be deleted):
+training.data <- training.data[,colSums(is.na(training.data)) == 0] 
+# Delete not required colums
+not_required <- "avg|stddev|var|min|max|amplitude|skewness|kurtosis|timestamp|user_name|new_window"
+throwcols<-grep(not_required,names(training.data),value=FALSE)
+training.data<-training.data[,-throwcols]
+str(training.data)
+
+# Testing dataset:
+testing.data <- read.csv("pml-testing.csv",header=TRUE,na.strings=c("NA","#DIV/0!", ""))
+str(testing.data)
+#head(testing.data)
+#summary(testing.data)
+
+# Delete missing values (100 variables will be deleted):
+testing.data <- testing.data[,colSums(is.na(testing.data)) == 0] 
+# Delete not required colums
+not_required <- "avg|stddev|var|min|max|amplitude|skewness|kurtosis|timestamp|user_name|new_window"
+throwcols<-grep(not_required,names(testing.data),value=FALSE)
+testing.data<-testing.data[,-throwcols]
+str(testing.data)
+
+# Drop classe colum
+training.data[,1]<-NULL
+testing.data[,1]<-NULL
+```
+
+
+Now that we are working with clean data, subset the training into train and test.  75% of the training data is used to build the model,  and 25% is used to  validate the model and to estimate the out of sample error.
+
+```{r}
+library(caret)
+inTrain <- createDataPartition(y=training.data$classe,p=0.75,list=FALSE)
+training.train <- training.data[inTrain,]
+training.test <- training.data[-inTrain,]
+dim(training.train); dim(training.test)
+```
+
+The dependent variable is classe and it's distribution in the training and in the training,train set is shown in the plot.
+```{r}
+table(training.data$classe)
+table(training.train$classe)
+par(mfrow=c(2,1))
+plot(training.data$classe,col="red",main="Variable Classe in\n training data set",
+     ylab="Frequency",xlab="Class levels")
+plot(training.train$classe,col="green",main="Variable Classe in\n training.train data set",
+     ylab="Frequency",xlab="Class levels")
+```
+
+Since the outcome is categorical and the explanatory variables are all continuous random variables, the prediction model is built using different models using the subsetting training data. The model is then applied to the subsetted testing data to estimate the confusion matrix and consequently the accuracy. Showing this accuracy for all models is performed and the model with the best accuracy is selected.
+
+Now we fit a model with:
+i) trees.
+ii) Random forests.
+iia) Random forests.
+iii) lda.
+iv) Naive-Bayes.
+v)  SVM.
+vi) KSVM.
+
+
+```{r}
+# 1. TREES
+library(rpart)
+tree <- rpart(classe~., data=training.train,method="class")
+predict.tree <- predict(tree,type="class",newdata=training.test)
+cmatrix.tree <- confusionMatrix(predict.tree,training.test$classe)
+
+
+# 2. RANDOM FORESTS
+library(randomForest)
+rf <- randomForest(classe ~. , data=training.train, method="class")
+prediction.rf <- predict(rf, training.test, type = "class")
+cmatrix.rf <- confusionMatrix(prediction.rf, training.test$classe)
+
+
+# 2a. RANDOM FORESTS, IMPORTANCE=TRUE
+library(randomForest)
+rf1 <- randomForest(classe ~. , data=training.train, importance=TRUE)
+prediction.rf1 <- predict(rf1, training.test, type = "class")
+cmatrix.rf1 <- confusionMatrix(prediction.rf1, training.test$classe)
+
+# 3. LDA
+lda <- train(classe~., data=training.train,method="lda")
+predict.lda <- predict(lda,newdata=training.test)            
+cmatrix.lda <- confusionMatrix(training.test$classe,predict.lda)
+
+# 4. NAIVE-BAYES
+library(klaR)
+nb <- NaiveBayes(as.factor(classe)~., data=training.train)
+predict.nb <- suppressWarnings(predict(nb,newdata=training.test))
+cmatrix.nb <- confusionMatrix(training.test$classe,predict.nb$class)
+
+# 5. SVM
+library(e1071)
+# tune does not end in a reasonable period of time, e.g. 4 hours
+#tune.out <- tune(svm, classe ~. , data=training.train, kernel="radial", 
+#    ranges = list(cost=c(0.1, 1, 10, 100, 1000), 
+#    gamma=c(0.5, 1, 2, 3, 4)))
+svmfit <- svm(classe ~. , data=training.train, kernel="radial", cost=10, gamma=1)
+prediction.svm <- predict(svmfit, training.test, type = "class")
+cmatrix.svm <- confusionMatrix(prediction.svm, training.test$classe)
+
+# 6. KSVM
+library(kernlab)
+ksvmfit <- ksvm(classe ~. , data=training.train, kernel="rbfdot", kpar = "automatic", C = 60, cross = 2)
+prediction.ksvm <- predict(ksvmfit, training.test, type ="response")
+cmatrix.ksvm <- confusionMatrix(prediction.ksvm, training.test$classe)
+
+# Comparison of the models:
+accuracy.tree <- round(as.numeric(cmatrix.tree$overall[1]),4)
+accuracy.rf <- round(as.numeric(cmatrix.rf$overall[1]),4)
+accuracy.lda <- round(as.numeric(cmatrix.lda$overall[1]),4)
+accuracy.nb <- round(as.numeric(cmatrix.nb$overall[1]),4)
+accuracy.rf1 <- round(as.numeric(cmatrix.rf1$overall[1]),4)
+accuracy.svm <- round(as.numeric(cmatrix.svm$overall[1]),4)
+accuracy.ksvm <- round(as.numeric(cmatrix.ksvm$overall[1]),4)
+method <- c("Tree","Random Forest","LDA","Naive-Bayes", "Random Forest1", "SVM", "KSVM")
+acc <- c(accuracy.tree,accuracy.rf,accuracy.lda,accuracy.nb, accuracy.rf1, accuracy.svm, accuracy.ksvm)
+a <- matrix(0,ncol=7,nrow=2)
+a[1,] <- method
+a[2,] <- acc
+print(a)
+
+# The model wich has the best fit is the Random Forest:
+a[,2]
+cmatrix.rf
+```
+
+The entire output of confusionMatrix for the best model (Random Forest) is shown above;it does provide the accuracy statistic as  `r accuracy.rf`, approximately `r accuracy.rf*100`%.
+
+We now apply the best prediction model to the test dataset to predict the outcomes.
+```{r}
+# Once we selected the best model, we  use it in test set.
+rf.test <- predict(rf,testing.data,type="class")
+rf.test
+```
+
+rf.test now contains the 20 predictions, which in order are: 
+>B  A  B  A  A  E  D  B  A  A  B  C  B  A  E  E  A  B  B  B
+
+The remainder of the code simply writes these predictions to text files for uploading for assessment.
+```{r}
+pml_write_files = function(x){
+  n = length(x)
+  for(i in 1:n){
+    fname = paste0("problem_id_",i,".txt")
+    write.table(x[i],file=fname,quote=FALSE,row.names=FALSE,col.names=FALSE)
+  }
+}
+pml_write_files(rf.test) 
+```
+
+
+## References
+
+Velloso, E.; Bulling, A.; Gellersen, H.; Ugulino, W.; Fuks, H. Qualitative Activity Recognition of Weight Lifting Exercises. Proceedings of 4th International Conference in Cooperation with SIGCHI (Augmented Human '13) . Stuttgart, Germany: ACM SIGCHI, 2013.
+
+Read more: <http://groupware.les.inf.puc-rio.br/har#ixzz3MTnYewf1>
